@@ -1,0 +1,10 @@
+[package]
+name = "pinowm"
+version = "0.1.0"
+edition = "2018"
+authors = ["pinosaur"]
+description = "simple window manager"
+repository = "https://github.com/MrPicklePinosaur/pinowm"
+
+[dependencies]
+x11rb = { version = "0.9.0", features = [] }
