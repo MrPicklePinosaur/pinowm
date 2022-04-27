@@ -5,7 +5,7 @@ use x11rb::protocol::{
     Event,
     xproto::*
 };
-use x11rb::errors::{ReplyOrIdError, ReplyError};
+use x11rb::errors::{ReplyOrIdError, ReplyError, ConnectionError};
 
 use super::hotkey;
 use super::config;
@@ -22,10 +22,9 @@ impl<'a, C: Connection> WM<'a, C> {
     pub fn new(conn: &'a C, screen: &'a Screen) -> Result<WM<'a, C>, ReplyOrIdError>{
 
         let gc_id = conn.generate_id()?;
-        
         let values_list = CreateGCAux::new()
-            .foreground(screen.black_pixel)
-            .background(screen.white_pixel);
+            .foreground(screen.white_pixel)
+            .background(screen.black_pixel);
         conn.create_gc(gc_id, screen.root, &values_list)?;
 
         Ok(WM {
@@ -38,9 +37,6 @@ impl<'a, C: Connection> WM<'a, C> {
 
     pub fn handle_event(&mut self, event: &Event) -> Result<(), Box<dyn std::error::Error>> {
         match event {
-            Event::Expose(event) => {
-                println!("expose event");
-            }
             Event::CreateNotify(event) => {
                 // we don't need to do anything here
             }
@@ -57,9 +53,7 @@ impl<'a, C: Connection> WM<'a, C> {
 
             }
             Event::MapRequest(event) => {
-                println!("map request");
-                self.conn.map_window(event.window)?;
-                self.conn.flush()?;
+                self.handle_map_window(event)?;
             }
             Event::KeyPress(event) => {
                 hotkey::handle_keypress(self, event)?;
@@ -69,7 +63,7 @@ impl<'a, C: Connection> WM<'a, C> {
         Ok(())
     }
 
-    fn map_window(&self, event: &MapRequestEvent) -> Result<(), ReplyOrIdError> {
+    fn handle_map_window(&self, event: &MapRequestEvent) -> Result<(), ReplyOrIdError> {
 
         // create frame
         let frame_win_id = self.create_frame(event)?;
@@ -91,7 +85,7 @@ impl<'a, C: Connection> WM<'a, C> {
 
         let values_list = CreateWindowAux::default()
             .background_pixel(self.screen.white_pixel)
-            .event_mask(EventMask::EXPOSURE|EventMask::KEY_PRESS);
+            .event_mask(EventMask::SUBSTRUCTURE_REDIRECT|EventMask::SUBSTRUCTURE_NOTIFY);
         self.conn.create_window(
             COPY_DEPTH_FROM_PARENT,
             frame_id,
@@ -107,6 +101,19 @@ impl<'a, C: Connection> WM<'a, C> {
         )?;
 
         Ok(frame_id)
+    }
+
+    pub fn draw_bar(&self) -> Result<(), ConnectionError> {
+
+        let rect = Rectangle {
+            x: 0,
+            y: 0,
+            width: 600,
+            height: 10,
+        };
+        self.conn.poly_fill_rectangle(self.screen.root, self.gc_id, &[rect])?;
+
+        Ok(())
     }
 
     pub fn become_wm(&self) -> Result<(), ReplyError> {

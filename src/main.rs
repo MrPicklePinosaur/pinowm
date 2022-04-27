@@ -15,7 +15,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     while wm.is_running() {
         let event = conn.wait_for_event()?;
 
-        wm.handle_event(&event);
+        wm.handle_event(&event)?;
     }
 
     drop(conn);
