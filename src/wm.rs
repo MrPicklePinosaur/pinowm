@@ -1,4 +1,5 @@
 
+use std::collections::HashMap;
 use x11rb::connection::Connection;
 use x11rb::COPY_DEPTH_FROM_PARENT;
 use x11rb::protocol::{
@@ -13,24 +14,30 @@ use super::config;
 pub struct WM<'a, C: Connection> {
     conn: &'a C,
     screen: &'a Screen,
-    gc_id: Gcontext,
+    frame_gc: Gcontext,
+    clients: HashMap<Window, Window>, // index frames by the window id
     running: bool,
+}
+
+pub enum WMError {
+    
 }
 
 impl<'a, C: Connection> WM<'a, C> {
 
     pub fn new(conn: &'a C, screen: &'a Screen) -> Result<WM<'a, C>, ReplyOrIdError>{
 
-        let gc_id = conn.generate_id()?;
+        let frame_gc = conn.generate_id()?;
         let values_list = CreateGCAux::new()
             .foreground(screen.white_pixel)
             .background(screen.black_pixel);
-        conn.create_gc(gc_id, screen.root, &values_list)?;
+        conn.create_gc(frame_gc, screen.root, &values_list)?;
 
         Ok(WM {
             conn: conn,
             screen: screen,
-            gc_id: gc_id,
+            frame_gc: frame_gc,
+            clients: HashMap::new(),
             running: true
         })
     }
@@ -41,7 +48,7 @@ impl<'a, C: Connection> WM<'a, C> {
                 // we don't need to do anything here
             }
             Event::DestroyNotify(event) => {
-                println!("destroy event");
+                // also don't need to do anything
             }
             Event::ConfigureRequest(event) => {
                 println!("configure request");
@@ -55,6 +62,9 @@ impl<'a, C: Connection> WM<'a, C> {
             Event::MapRequest(event) => {
                 self.handle_map_window(event)?;
             }
+            Event::UnmapNotify(event) => {
+                self.handle_unmap_window(event)?;
+            }
             Event::KeyPress(event) => {
                 hotkey::handle_keypress(self, event)?;
             }
@@ -63,16 +73,33 @@ impl<'a, C: Connection> WM<'a, C> {
         Ok(())
     }
 
-    fn handle_map_window(&self, event: &MapRequestEvent) -> Result<(), ReplyOrIdError> {
+    fn handle_map_window(&mut self, event: &MapRequestEvent) -> Result<(), ReplyOrIdError> {
 
         // create frame
-        let frame_win_id = self.create_frame(event)?;
+        let frame_win = self.create_frame(event)?;
 
         // reparent
+        self.clients.insert(event.window, frame_win);
         change_save_set(self.conn, SetMode::INSERT, event.window)?;
-        reparent_window(self.conn, event.window, frame_win_id, 0, 0)?;
+        reparent_window(self.conn, event.window, frame_win, 0, 0)?;
+
         self.conn.map_window(event.window)?;
-        self.conn.map_window(frame_win_id)?;
+        self.conn.map_window(frame_win)?;
+
+        Ok(())
+    }
+
+    fn handle_unmap_window(&mut self, event: &UnmapNotifyEvent) -> Result<(), ReplyOrIdError> {
+
+        let frame_win = self.clients.get(&event.window).unwrap().clone(); // all windows (should?) have a frame
+
+        self.conn.unmap_window(frame_win)?;
+
+        reparent_window(self.conn, event.window, self.screen.root, 0, 0)?;
+        change_save_set(self.conn, SetMode::DELETE, event.window)?;
+        self.clients.remove(&event.window);
+
+        self.conn.destroy_window(frame_win)?;
 
         Ok(())
     }
@@ -84,7 +111,7 @@ impl<'a, C: Connection> WM<'a, C> {
         let frame_id = self.conn.generate_id()?;
 
         let values_list = CreateWindowAux::default()
-            .background_pixel(self.screen.white_pixel)
+            .border_pixel(self.screen.white_pixel)
             .event_mask(EventMask::SUBSTRUCTURE_REDIRECT|EventMask::SUBSTRUCTURE_NOTIFY);
         self.conn.create_window(
             COPY_DEPTH_FROM_PARENT,
@@ -103,7 +130,12 @@ impl<'a, C: Connection> WM<'a, C> {
         Ok(frame_id)
     }
 
-    pub fn draw_bar(&self) -> Result<(), ConnectionError> {
+    pub fn render(&self) -> Result<(), ConnectionError> {
+        self.draw_bar()?;
+        Ok(())
+    }
+
+    fn draw_bar(&self) -> Result<(), ConnectionError> {
 
         let rect = Rectangle {
             x: 0,
@@ -111,7 +143,7 @@ impl<'a, C: Connection> WM<'a, C> {
             width: 600,
             height: 10,
         };
-        self.conn.poly_fill_rectangle(self.screen.root, self.gc_id, &[rect])?;
+        self.conn.poly_fill_rectangle(self.screen.root, self.frame_gc, &[rect])?;
 
         Ok(())
     }

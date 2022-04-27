@@ -13,8 +13,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("starting pinowm...");
 
     while wm.is_running() {
-        let event = conn.wait_for_event()?;
+        wm.render()?;
+        conn.flush()?;
 
+        let event = conn.wait_for_event()?;
         wm.handle_event(&event)?;
     }
 
