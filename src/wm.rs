@@ -1,5 +1,6 @@
 
 use x11rb::connection::Connection;
+use x11rb::COPY_DEPTH_FROM_PARENT;
 use x11rb::protocol::{
     Event,
     xproto::*
@@ -7,6 +8,7 @@ use x11rb::protocol::{
 use x11rb::errors::{ReplyOrIdError, ReplyError};
 
 use super::hotkey;
+use super::config;
 
 pub struct WM<'a, C: Connection> {
     conn: &'a C,
@@ -21,10 +23,10 @@ impl<'a, C: Connection> WM<'a, C> {
 
         let gc_id = conn.generate_id()?;
         
-        let gc_aux = CreateGCAux::new()
+        let values_list = CreateGCAux::new()
             .foreground(screen.black_pixel)
             .background(screen.white_pixel);
-        conn.create_gc(gc_id, screen.root, &gc_aux)?;
+        conn.create_gc(gc_id, screen.root, &values_list)?;
 
         Ok(WM {
             conn: conn,
@@ -34,22 +36,77 @@ impl<'a, C: Connection> WM<'a, C> {
         })
     }
 
-    pub fn handle_event(&mut self, event: &Event) {
+    pub fn handle_event(&mut self, event: &Event) -> Result<(), Box<dyn std::error::Error>> {
         match event {
             Event::Expose(event) => {
                 println!("expose event");
             }
             Event::CreateNotify(event) => {
-                println!("create event");
+                // we don't need to do anything here
             }
             Event::DestroyNotify(event) => {
                 println!("destroy event");
             }
+            Event::ConfigureRequest(event) => {
+                println!("configure request");
+
+                let values_list = ConfigureWindowAux::from_configure_request(&event)
+                    .sibling(None)
+                    .stack_mode(None);
+                self.conn.configure_window(event.window, &values_list)?;
+
+            }
+            Event::MapRequest(event) => {
+                println!("map request");
+                self.conn.map_window(event.window)?;
+                self.conn.flush()?;
+            }
             Event::KeyPress(event) => {
-                hotkey::handle_keypress(self, event);
+                hotkey::handle_keypress(self, event)?;
             }
             _ => {}
         }
+        Ok(())
+    }
+
+    fn map_window(&self, event: &MapRequestEvent) -> Result<(), ReplyOrIdError> {
+
+        // create frame
+        let frame_win_id = self.create_frame(event)?;
+
+        // reparent
+        change_save_set(self.conn, SetMode::INSERT, event.window)?;
+        reparent_window(self.conn, event.window, frame_win_id, 0, 0)?;
+        self.conn.map_window(event.window)?;
+        self.conn.map_window(frame_win_id)?;
+
+        Ok(())
+    }
+
+    fn create_frame(&self, event: &MapRequestEvent) -> Result<Window, ReplyOrIdError> {
+
+        let win_geom = get_geometry(self.conn, event.window)?.reply()?;
+
+        let frame_id = self.conn.generate_id()?;
+
+        let values_list = CreateWindowAux::default()
+            .background_pixel(self.screen.white_pixel)
+            .event_mask(EventMask::EXPOSURE|EventMask::KEY_PRESS);
+        self.conn.create_window(
+            COPY_DEPTH_FROM_PARENT,
+            frame_id,
+            self.screen.root,
+            win_geom.x,
+            win_geom.y,
+            win_geom.width,
+            win_geom.height,
+            config::BORDER_WIDTH,
+            WindowClass::INPUT_OUTPUT,
+            self.screen.root_visual,
+            &values_list,
+        )?;
+
+        Ok(frame_id)
     }
 
     pub fn become_wm(&self) -> Result<(), ReplyError> {

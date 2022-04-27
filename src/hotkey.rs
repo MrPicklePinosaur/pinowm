@@ -5,9 +5,11 @@ use x11rb::protocol::{
         KeyPressEvent 
     }
 };
+use std::process::Command;
+
 use super::wm::WM;
 
-pub fn handle_keypress<C: Connection>(wm: &mut WM<C>, event: &KeyPressEvent) {
+pub fn handle_keypress<C: Connection>(wm: &mut WM<C>, event: &KeyPressEvent) -> Result<(), Box<dyn std::error::Error>> {
     
     println!("{:?}, {:?}", event.state, event.detail);
 
@@ -17,9 +19,10 @@ pub fn handle_keypress<C: Connection>(wm: &mut WM<C>, event: &KeyPressEvent) {
             wm.terminate();
         }
         57 => { // n
-
+            Command::new("st").spawn()?;
         }
         _ => {}
     }
+    Ok(())
 }
 
