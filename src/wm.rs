@@ -17,12 +17,18 @@ pub struct WM<'a, C: Connection> {
     screen: &'a Screen,
     frame_gc: Gcontext,
     win_stack: Vec<Win>,
+    layout: Layout,
     running: bool,
 }
 
 struct Win {
     client: Window,
     frame: Window
+}
+
+enum Layout {
+    Column,
+    Tile,
 }
 
 impl<'a, C: Connection> WM<'a, C> {
@@ -40,6 +46,7 @@ impl<'a, C: Connection> WM<'a, C> {
             screen: screen,
             frame_gc: frame_gc,
             win_stack: Vec::new(),
+            layout: Layout::Tile,
             running: true
         })
     }
@@ -112,7 +119,7 @@ impl<'a, C: Connection> WM<'a, C> {
         self.conn.map_window(event.window)?;
         self.conn.map_window(frame_win)?;
 
-        self.arrange_win()?;
+        self.arrange_windows()?;
 
         Ok(())
     }
@@ -132,7 +139,7 @@ impl<'a, C: Connection> WM<'a, C> {
 
         self.remove_win_by_id(event.window);
 
-        self.arrange_win()?;
+        self.arrange_windows()?;
 
         Ok(())
     }
@@ -177,30 +184,91 @@ impl<'a, C: Connection> WM<'a, C> {
     }
 
     // resizes windows to layout
-    fn arrange_win(&self) -> Result<(), Box<dyn std::error::Error>> {
+    fn arrange_windows(&self) -> Result<(), Box<dyn std::error::Error>> {
 
-        // layout 1 (columns)
+        match self.layout {
+            Layout::Column => self.layout_column()?,
+            Layout::Tile => self.layout_tile()?,
+        }
+
+        Ok(())
+    }
+
+    // resizes both the client and frame of a window
+    fn arrange_window(&self, win: &Win, x: i32, y: i32, width: u32, height: u32) -> BoxResult<()> {
+
+        let values_list = ConfigureWindowAux::new()
+            .width(width)
+            .height(height);
+        self.conn.configure_window(win.client, &values_list)?;
+
+        let values_list = ConfigureWindowAux::new()
+            .x(x)
+            .y(y)
+            .width(width)
+            .height(height);
+        self.conn.configure_window(win.frame, &values_list)?;
+
+        Ok(())
+    }
+
+    fn layout_column(&self) -> Result<(), Box<dyn std::error::Error>> {
+
         let width = self.screen.width_in_pixels as u32 / self.win_stack.len() as u32;
         let height = (self.screen.height_in_pixels - config::BAR_HEIGHT) as u32;
 
         for i in 0..self.win_stack.len() {
 
             let win = &self.win_stack[i];
-
-            let values_list = ConfigureWindowAux::new()
-                .width(width)
-                .height(height);
-            self.conn.configure_window(win.client, &values_list)?;
-
-            let values_list = ConfigureWindowAux::new()
-                .x((i as u32 * width) as i32)
-                .y(config::BAR_HEIGHT as i32)
-                .width(width)
-                .height(height);
-            self.conn.configure_window(win.frame, &values_list)?;
+            self.arrange_window(
+                win,
+                (i as u32 * width) as i32,
+                config::BAR_HEIGHT as i32,
+                width,
+                height
+            )?;
         }
+
         Ok(())
     }
+
+    fn layout_tile(&self) -> Result<(), Box<dyn std::error::Error>> {
+
+        if self.win_stack.len() == 0 { return Ok(()); }
+
+        let width = self.screen.width_in_pixels as u32 / (if self.win_stack.len() > 1 { 2 } else { 1 });
+        let height = (self.screen.height_in_pixels - config::BAR_HEIGHT) as u32;
+
+        // arrange master window
+        let master_win = &self.win_stack[0];
+        self.arrange_window(
+            master_win,
+            0,
+            config::BAR_HEIGHT as i32,
+            width,
+            height
+        )?;
+
+        if self.win_stack.len() == 1 { return Ok(()); }
+
+        // arrange slave windows
+        let slave_height = height / (self.win_stack.len() - 1) as u32;
+        for i in 1..self.win_stack.len() {
+
+            let slave_win = &self.win_stack[i];
+            self.arrange_window(
+                slave_win,
+                width as i32,
+                config::BAR_HEIGHT as i32 + (slave_height as i32) * (i as i32 - 1),
+                width,
+                slave_height,
+            )?;
+
+        }
+
+        Ok(())
+    }
+
 
     fn find_win_by_id(&self, win: Window) -> Option<&Win> {
         self.win_stack.iter().find(|w| w.client == win)
