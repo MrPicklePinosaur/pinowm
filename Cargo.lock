@@ -69,6 +69,7 @@ name = "pinowm"
 version = "0.1.0"
 dependencies = [
  "x11rb",
+ "xmodmap",
 ]
 
 [[package]]
@@ -113,3 +114,8 @@ dependencies = [
  "winapi",
  "winapi-wsapoll",
 ]
+
+[[package]]
+name = "xmodmap"
+version = "0.1.0"
+source = "git+https://github.com/MrPicklePinosaur/matsuba#c3527536d28245d88d209343f8b004395d96d231"

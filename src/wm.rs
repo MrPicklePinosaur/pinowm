@@ -8,7 +8,7 @@ use x11rb::protocol::{
 };
 use x11rb::errors::{ReplyOrIdError, ReplyError, ConnectionError};
 
-use super::hotkey;
+use super::hotkey::KeyHandler;
 use super::config;
 use super::error::BoxResult;
 
@@ -16,6 +16,7 @@ pub struct WM<'a, C: Connection> {
     conn: &'a C,
     screen: &'a Screen,
     frame_gc: Gcontext,
+    key_handler: KeyHandler,
     win_stack: Vec<Win>,
     layout: Layout,
     running: bool,
@@ -33,7 +34,7 @@ enum Layout {
 
 impl<'a, C: Connection> WM<'a, C> {
 
-    pub fn new(conn: &'a C, screen: &'a Screen) -> Result<WM<'a, C>, ReplyOrIdError>{
+    pub fn new(conn: &'a C, screen: &'a Screen) -> BoxResult<WM<'a, C>>{
 
         let frame_gc = conn.generate_id()?;
         let values_list = CreateGCAux::new()
@@ -41,10 +42,13 @@ impl<'a, C: Connection> WM<'a, C> {
             .background(screen.black_pixel);
         conn.create_gc(frame_gc, screen.root, &values_list)?;
 
+        let key_handler = KeyHandler::new()?;
+
         Ok(WM {
             conn: conn,
             screen: screen,
             frame_gc: frame_gc,
+            key_handler: key_handler,
             win_stack: Vec::new(),
             layout: Layout::Tile,
             running: true
@@ -96,7 +100,7 @@ impl<'a, C: Connection> WM<'a, C> {
                 self.handle_unmap_window(event)?;
             }
             Event::KeyPress(event) => {
-                hotkey::handle_keypress(self, event)?;
+                self.key_handler.handle_keypress(event)?;
             }
             _ => {}
         }

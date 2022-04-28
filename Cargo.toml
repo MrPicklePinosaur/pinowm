@@ -7,4 +7,6 @@ description = "simple window manager"
 repository = "https://github.com/MrPicklePinosaur/pinowm"
 
 [dependencies]
+xmodmap = { git = "https://github.com/MrPicklePinosaur/matsuba" }
+
 x11rb = { version = "0.9.0", features = [] }
