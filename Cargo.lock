@@ -118,4 +118,4 @@ dependencies = [
 [[package]]
 name = "xmodmap"
 version = "0.1.0"
-source = "git+https://github.com/MrPicklePinosaur/matsuba#40dbb5724b95a37eae63b9de1fd94217ce9b3516"
+source = "git+https://github.com/MrPicklePinosaur/matsuba#7eef86a0dde750b48784f20200472893ec6036e3"

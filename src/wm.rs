@@ -1,5 +1,6 @@
 
 use std::collections::{HashMap, VecDeque};
+use std::process::Command;
 use x11rb::connection::Connection;
 use x11rb::COPY_DEPTH_FROM_PARENT;
 use x11rb::protocol::{
@@ -7,9 +8,8 @@ use x11rb::protocol::{
     xproto::*
 };
 use x11rb::errors::{ReplyOrIdError, ReplyError, ConnectionError};
-use xmodmap::KeySym;
+use xmodmap::{KeyTable, KeySym, Modifier};
 
-use super::hotkey::KeyHandler;
 use super::config;
 use super::error::BoxResult;
 
@@ -17,7 +17,7 @@ pub struct WM<'a, C: Connection> {
     conn: &'a C,
     screen: &'a Screen,
     frame_gc: Gcontext,
-    key_handler: KeyHandler,
+    keytable: KeyTable,
     win_stack: VecDeque<Win>,
     layout: Layout,
     running: bool,
@@ -43,13 +43,13 @@ impl<'a, C: Connection> WM<'a, C> {
             .background(screen.black_pixel);
         conn.create_gc(frame_gc, screen.root, &values_list)?;
 
-        let key_handler = KeyHandler::new()?;
+        let keytable = KeyTable::new()?;
 
         Ok(WM {
             conn: conn,
             screen: screen,
             frame_gc: frame_gc,
-            key_handler: key_handler,
+            keytable: keytable,
             win_stack: VecDeque::new(),
             layout: Layout::Tile,
             running: true
@@ -105,7 +105,7 @@ impl<'a, C: Connection> WM<'a, C> {
                 // Command::new("st").spawn()?;
             }
             Event::KeyPress(event) => {
-                self.key_handler.handle_keypress(event)?;
+                self.handle_keypress(event)?;
             }
             _ => {}
         }
@@ -126,8 +126,7 @@ impl<'a, C: Connection> WM<'a, C> {
         reparent_window(self.conn, event.window, frame_win, 0, 0)?;
 
         // grab keys
-        self.window_grab_key(event.window, config::MOD_KEY, KeySym::KEY_n)?;
-        self.window_grab_key(event.window, config::MOD_KEY, KeySym::KEY_Q)?; // TODO bugged (need to include shift in modifier)
+        self.window_grab_keys(event.window)?;
 
         self.conn.map_window(event.window)?;
         self.conn.map_window(frame_win)?;
@@ -137,13 +136,28 @@ impl<'a, C: Connection> WM<'a, C> {
         Ok(())
     }
 
+    fn window_grab_keys(&self, window: Window) -> BoxResult<()> {
+        self.window_grab_key(window, config::MOD_KEY, KeySym::KEY_n)?;
+        self.window_grab_key(window, config::MOD_KEY, KeySym::KEY_Q)?;
+        self.window_grab_key(window, config::MOD_KEY, KeySym::KEY_C)?;
+        Ok(())
+    }
+
     fn window_grab_key<A>(
         &self, window: Window,
         modifiers: A,
         keysym: KeySym
     ) -> BoxResult<()> where A: Into<u16> {
-        let keytable = &self.key_handler.keytable;
-        self.conn.grab_key(false, window, modifiers, keytable.get_keycode(keysym)?, GrabMode::ASYNC, GrabMode::ASYNC)?;
+
+        let mut modifiers: u16 = modifiers.into();
+        let (modifier, keycode) = &self.keytable.get_key(keysym)?;
+
+        // add shift key to mod if needed
+        if *modifier == Modifier::ShiftKey {
+            modifiers = modifiers | u16::from(KeyButMask::SHIFT);
+        }
+
+        self.conn.grab_key(false, window, modifiers, *keycode, GrabMode::ASYNC, GrabMode::ASYNC)?;
         Ok(())
     }
 
@@ -292,6 +306,32 @@ impl<'a, C: Connection> WM<'a, C> {
         Ok(())
     }
 
+    pub fn handle_keypress(
+        &mut self,
+        event: &KeyPressEvent
+    ) -> Result<(), Box<dyn std::error::Error>> {
+
+        let modifier = if event.state & u16::from(KeyButMask::SHIFT) == 0 { Modifier::Key } else { Modifier::ShiftKey };
+        let keysym = self.keytable.get_keysym(modifier, event.detail);
+        if keysym.is_err() { return Ok(()); }
+        let keysym = keysym.unwrap();
+        
+        // these keys all use the mod key
+        if event.state & u16::from(config::MOD_KEY) != 0 {
+            match keysym {
+                KeySym::KEY_Q => {
+                    self.terminate();
+                }
+                KeySym::KEY_n => {
+                    Command::new("st").spawn()?;
+                }
+                KeySym::KEY_C => {
+                }
+                _ => {}
+            }
+        }
+        Ok(())
+    }
 
     fn find_win_by_id(&self, win: Window) -> Option<&Win> {
         self.win_stack.iter().find(|w| w.client == win)

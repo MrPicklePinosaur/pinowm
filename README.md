@@ -4,6 +4,11 @@
 very simple window manager written in rust to learn X11/xcb and also how a
 window manager works under the hood.
 
+some features include
+- dynamic tiling
+- status bar (included as seperate crate)
+- config file
+
 ## RUNNING FOR DEVELOPMENT
 
 to run with `startx` include the line
@@ -19,8 +24,10 @@ $ startx
 
 ## TODO
 
-- [ ] proper key codes from xmodmap
-- [ ] borders
+- [x] proper key codes from xmodmap
+- [x] borders
 - [ ] statusbar (maybe as seperate crate)
-- [ ] dynamic window tiling
+- [x] dynamic window tiling
+- [ ] window focus + change focus
+- [ ] proper hotkey config system
 
