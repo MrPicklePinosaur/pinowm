@@ -3,14 +3,14 @@ use x11rb::connection::Connection;
 use x11rb::protocol::xproto::{KeyPressEvent, KeyButMask};
 use std::process::Command;
 use std::fmt;
-use xmodmap::{KeyTable, KeySym};
+use xmodmap::{KeyTable, KeySym, Modifier};
 
 use super::config;
 use super::wm::WM;
 use super::error::BoxResult;
 
 pub struct KeyHandler {
-    keytable: KeyTable,
+    pub keytable: KeyTable,
 }
 
 #[derive(Debug)]
@@ -30,9 +30,8 @@ impl KeyHandler {
     ) -> Result<(), Box<dyn std::error::Error>> {
 
         // TODO current issue with xmodmap library (event state uses the entire state instead of just shift)
-        let shift_pressed = event.state & u16::from(KeyButMask::SHIFT);
-
-        let keysym = self.keytable.get_keysym(shift_pressed, event.detail);
+        let modifier = if event.state & u16::from(KeyButMask::SHIFT) == 0 { Modifier::Key } else { Modifier::ShiftKey };
+        let keysym = self.keytable.get_keysym(modifier, event.detail);
         if keysym.is_err() { return Ok(()); }
         let keysym = keysym.unwrap();
         

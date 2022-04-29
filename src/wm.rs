@@ -1,5 +1,5 @@
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use x11rb::connection::Connection;
 use x11rb::COPY_DEPTH_FROM_PARENT;
 use x11rb::protocol::{
@@ -7,6 +7,7 @@ use x11rb::protocol::{
     xproto::*
 };
 use x11rb::errors::{ReplyOrIdError, ReplyError, ConnectionError};
+use xmodmap::KeySym;
 
 use super::hotkey::KeyHandler;
 use super::config;
@@ -17,7 +18,7 @@ pub struct WM<'a, C: Connection> {
     screen: &'a Screen,
     frame_gc: Gcontext,
     key_handler: KeyHandler,
-    win_stack: Vec<Win>,
+    win_stack: VecDeque<Win>,
     layout: Layout,
     running: bool,
 }
@@ -49,7 +50,7 @@ impl<'a, C: Connection> WM<'a, C> {
             screen: screen,
             frame_gc: frame_gc,
             key_handler: key_handler,
-            win_stack: Vec::new(),
+            win_stack: VecDeque::new(),
             layout: Layout::Tile,
             running: true
         })
@@ -59,7 +60,7 @@ impl<'a, C: Connection> WM<'a, C> {
 
         // set root window mask
         let values_list = ChangeWindowAttributesAux::default()
-            .event_mask(EventMask::SUBSTRUCTURE_REDIRECT|EventMask::SUBSTRUCTURE_NOTIFY|EventMask::KEY_PRESS);
+            .event_mask(EventMask::SUBSTRUCTURE_REDIRECT|EventMask::SUBSTRUCTURE_NOTIFY|EventMask::KEY_PRESS|EventMask::FOCUS_CHANGE|EventMask::ENTER_WINDOW);
         change_window_attributes(self.conn, self.screen.root, &values_list)?.check()?;
 
         Ok(())
@@ -99,6 +100,10 @@ impl<'a, C: Connection> WM<'a, C> {
             Event::UnmapNotify(event) => {
                 self.handle_unmap_window(event)?;
             }
+            Event::EnterNotify(event) => {
+                // use std::process::Command;
+                // Command::new("st").spawn()?;
+            }
             Event::KeyPress(event) => {
                 self.key_handler.handle_keypress(event)?;
             }
@@ -113,18 +118,32 @@ impl<'a, C: Connection> WM<'a, C> {
         let frame_win = self.create_frame(event)?;
 
         // reparent
-        self.win_stack.push(Win{
+        self.win_stack.push_front(Win{
             client: event.window,
             frame: frame_win,
         });
         change_save_set(self.conn, SetMode::INSERT, event.window)?;
         reparent_window(self.conn, event.window, frame_win, 0, 0)?;
 
+        // grab keys
+        self.window_grab_key(event.window, config::MOD_KEY, KeySym::KEY_n)?;
+        self.window_grab_key(event.window, config::MOD_KEY, KeySym::KEY_Q)?; // TODO bugged (need to include shift in modifier)
+
         self.conn.map_window(event.window)?;
         self.conn.map_window(frame_win)?;
 
         self.arrange_windows()?;
 
+        Ok(())
+    }
+
+    fn window_grab_key<A>(
+        &self, window: Window,
+        modifiers: A,
+        keysym: KeySym
+    ) -> BoxResult<()> where A: Into<u16> {
+        let keytable = &self.key_handler.keytable;
+        self.conn.grab_key(false, window, modifiers, keytable.get_keycode(keysym)?, GrabMode::ASYNC, GrabMode::ASYNC)?;
         Ok(())
     }
 
